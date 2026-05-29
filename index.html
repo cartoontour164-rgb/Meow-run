@@ -1,47 +1,141 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Meow Run</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
     <style>
-        body { margin: 0; padding: 0; background-color: #000; }
+        body { margin: 0; padding: 0; background-color: #222; overflow: hidden; }
         canvas { display: block; margin: 0 auto; }
     </style>
 </head>
 <body>
     <script>
-        // Tell Telegram the App is ready
+        // Initialize Telegram Mini App
         window.Telegram.WebApp.ready();
-        window.Telegram.WebApp.expand(); // Make it full screen
+        window.Telegram.WebApp.expand();
 
-        // We can extract the user ID instantly
-        const user_id = window.Telegram.WebApp.initDataUnsafe?.user?.id;
+        // Grab the user ID (Will be undefined if opened outside Telegram)
+        const tgUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 'test_user';
 
-        // Basic Phaser Setup (We will add the jump logic next)
         const config = {
             type: Phaser.AUTO,
             width: window.innerWidth,
             height: window.innerHeight,
             physics: {
                 default: 'arcade',
-                arcade: { gravity: { y: 800 }, debug: false }
+                arcade: { gravity: { y: 1200 }, debug: false }
             },
-            scene: { preload: preload, create: create, update: update }
+            scene: { create: create, update: update }
         };
 
         const game = new Phaser.Game(config);
 
-        function preload() {
-            // Load a simple box for the cat for testing
-        }
+        let player;
+        let obstacles;
+        let cursors;
+        let score = 0;
+        let scoreText;
+        let isGameOver = false;
+        let spawnTimer;
 
         function create() {
-            // Add background and player
+            // 1. Create the Ground
+            const floor = this.add.rectangle(config.width / 2, config.height - 50, config.width, 100, 0x4CAF50);
+            this.physics.add.existing(floor, true); // true = static body (won't fall)
+
+            // 2. Create the "Cat" (Orange Square)
+            player = this.add.rectangle(100, config.height - 150, 40, 40, 0xFFA500);
+            this.physics.add.existing(player);
+            
+            // Player physics settings
+            player.body.setCollideWorldBounds(true);
+            this.physics.add.collider(player, floor);
+
+            // 3. Setup Obstacles Group
+            obstacles = this.physics.add.group();
+            this.physics.add.collider(obstacles, floor);
+
+            // 4. Input: Tap screen to jump
+            this.input.on('pointerdown', jump, this);
+
+            // 5. UI: Score Text
+            scoreText = this.add.text(20, 20, 'Score: 0', { fontSize: '32px', fill: '#FFF', fontFamily: 'Arial' });
+
+            // 6. Spawn Obstacles periodically
+            spawnTimer = this.time.addEvent({
+                delay: 1500, // Spawn every 1.5 seconds
+                callback: spawnObstacle,
+                callbackScope: this,
+                loop: true
+            });
+
+            // 7. Collision Detection (Cat vs Obstacle)
+            this.physics.add.overlap(player, obstacles, hitObstacle, null, this);
         }
 
         function update() {
-            // Jump mechanics loop
+            if (isGameOver) return;
+
+            // Move obstacles to the left
+            obstacles.getChildren().forEach(function(obstacle) {
+                obstacle.x -= 5; // Run speed
+
+                // If obstacle goes off screen, destroy it and add a point
+                if (obstacle.x < -50) {
+                    obstacle.destroy();
+                    score += 10;
+                    scoreText.setText('Score: ' + score);
+                }
+            });
+        }
+
+        function jump() {
+            if (isGameOver) return;
+            
+            // Only allow jump if touching the ground
+            if (player.body.touching.down) {
+                player.body.setVelocityY(-600); // Jump force
+            }
+        }
+
+        function spawnObstacle() {
+            if (isGameOver) return;
+
+            // Randomize height slightly for variety
+            const obstacleHeight = Phaser.Math.Between(30, 60);
+            const obstacle = this.add.rectangle(config.width + 50, config.height - 100 - (obstacleHeight/2), 30, obstacleHeight, 0xFF0000);
+            
+            this.physics.add.existing(obstacle);
+            obstacle.body.setAllowGravity(false); // Keeps it sliding on the ground smoothly
+            obstacles.add(obstacle);
+        }
+
+        function hitObstacle() {
+            this.physics.pause();
+            spawnTimer.remove();
+            isGameOver = true;
+            player.fillColor = 0x888888; // Turn grey to show death
+
+            this.add.text(config.width / 2 - 100, config.height / 2 - 50, 'GAME OVER', { fontSize: '40px', fill: '#F00', fontFamily: 'Arial', fontStyle: 'bold' });
+            
+            // TODO: Send data to bot backend
+            sendScoreToBot(score);
+        }
+
+        function sendScoreToBot(finalScore) {
+            console.log(`Sending score ${finalScore} for user ${tgUserId} to backend...`);
+            
+            // We will build the FastAPI endpoint to catch this next!
+            /*
+            fetch('https://your-backend-url.onrender.com/update_score', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: tgUserId, score: finalScore })
+            });
+            */
         }
     </script>
 </body>
